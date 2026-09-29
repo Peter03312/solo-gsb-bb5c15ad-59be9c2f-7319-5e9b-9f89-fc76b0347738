@@ -8,6 +8,9 @@ const MAX_STOCK_PACKAGES = 30; // 采购包数量上限
 const MAX_SCHED_TASKS = 14; // 每阶段（撤下/摆上）最多 14 项搬运任务
 const MIN_CREW = 2;
 const MAX_CREW = 4;
+const MAX_STORAGE_PROPS = 14; // 侧台存放区分配：待存放道具种类上限
+const MIN_STORAGE_ZONES = 1;
+const MAX_STORAGE_ZONES = 4;
 let uidCounter = 0;
 const uid = () => `s${Date.now().toString(36)}_${uidCounter++}`;
 
@@ -26,6 +29,8 @@ const state = {
   stocking: null, // 巡演备货配置：{ prepared: string[], packages: [{ id, name, price, propsText }] }
   crew: null, // 换景人员排班配置：{ workers: string[], durations: { 道具名: 分钟 } }
   schedule: null, // 最近一次排班结果（仅当其 scheduleKey 与当前待执行步骤一致时有效）
+  storage: null, // 侧台存放区配置：{ zones: [{ id, name, capacity }], times: { 道具: { 区id: 分钟 | 'x' | null } } }
+  storageResult: null, // 最近一次存放区分配结果（仅当其 storageKey 与当前待执行步骤一致时有效）
 };
 
 const isTimed = () => state.mode === 'timed';
@@ -814,6 +819,7 @@ async function doSolve() {
   state.live = data.ok ? data : null;
   state.replan = null;
   clearSchedule();
+  clearStorageResult();
   renderResult(data);
 }
 
@@ -841,6 +847,7 @@ function renderResult(data) {
   }
   box.appendChild(replanPanelBlock(data));
   box.appendChild(schedulePanelBlock(data));
+  box.appendChild(storagePanelBlock(data));
   $('#result-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -1008,6 +1015,7 @@ async function doReplan(data, btn, msgEl) {
   };
   state.live = res;
   clearSchedule(); // 节目单已改变（前缀推进、后缀重排），旧排班作废
+  clearStorageResult(); // 待执行步骤随之改变，旧存放区分配也作废
   renderResult(res);
 }
 
@@ -1386,6 +1394,382 @@ function schedulePhaseBlock(title, phase, base, kind, workers) {
   });
   col.appendChild(ul);
   return col;
+}
+
+/* ================= 侧台存放区分配 ================= */
+
+/** 默认存放区配置：1 个 4 格存放区、无任何耗时。 */
+function defaultStorage() {
+  return { zones: [{ id: uid(), name: '存放区1', capacity: 4 }], times: {} };
+}
+
+/** 清除旧分配结果（节目单或存放区 / 耗时参数变化时调用；保留输入本身）。 */
+function clearStorageResult() {
+  state.storageResult = null;
+  const box = document.getElementById('storage-result');
+  if (box) box.innerHTML = '';
+}
+
+/** 清除旧结果并刷新存放区面板（结构性变化后只重建本面板，避免干扰其他面板焦点）。 */
+function refreshStoragePanel(data) {
+  const old = document.getElementById('storage-panel');
+  if (old) old.replaceWith(storagePanelBlock(data));
+}
+
+function storagePanelBlock(data) {
+  if (!state.storage) state.storage = defaultStorage();
+  const storage = state.storage;
+  const steps = pendingScheduleSteps(data); // 与排班同口径：phase !== 'done' 为待执行
+  const props = collectScheduleProps(steps); // 首次出现顺序
+
+  // 校对耗时表：新道具补 null（待填），已删道具 / 已删存放区的旧值清除
+  const times = {};
+  for (const p of props) {
+    const old = storage.times[p] || {};
+    const row = {};
+    for (const z of storage.zones) {
+      const v = old[z.id];
+      row[z.id] = v === 'x' ? 'x' : (Number.isInteger(v) && v > 0 ? v : null);
+    }
+    times[p] = row;
+  }
+  storage.times = times;
+
+  // 旧结果只在待执行步骤指纹一致时有效
+  const key = scheduleStepsKey(steps);
+  if (state.storageResult && state.storageResult.storageKey !== key) state.storageResult = null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'storage-panel';
+  wrap.id = 'storage-panel';
+
+  const h = document.createElement('h3');
+  h.textContent = '🗄 侧台存放区分配';
+  wrap.appendChild(h);
+
+  const intro = document.createElement('p');
+  intro.className = 'hint';
+  intro.textContent = '为待执行步骤里的换景道具分配固定存放区：每件道具全程只占 1 个格位，'
+    + '按各步骤撤下 / 摆上的累计次数 × 单次取放分钟计总耗时，在格位与"不可达"限制下求总耗时最短的分配；'
+    + '同耗时时按道具首次出现顺序、存放区录入顺序稳定选取。';
+  wrap.appendChild(intro);
+
+  // 存放区清单（1～4 个：名称 + 格位数）
+  const zoneHead = document.createElement('p');
+  zoneHead.className = 'hint storage-table-head';
+  zoneHead.textContent = `存放区（${MIN_STORAGE_ZONES}～${MAX_STORAGE_ZONES} 个）：名称不可重复，格位数为正整数`;
+  wrap.appendChild(zoneHead);
+
+  const zoneRows = document.createElement('div');
+  zoneRows.className = 'storage-zones';
+  storage.zones.forEach((z, zi) => {
+    const row = document.createElement('div');
+    row.className = 'storage-zone-row';
+    const nameInp = document.createElement('input');
+    nameInp.type = 'text';
+    nameInp.className = 'storage-zone-name';
+    nameInp.value = z.name;
+    nameInp.placeholder = `存放区 ${zi + 1}`;
+    nameInp.addEventListener('input', () => {
+      z.name = nameInp.value;
+      const head = zoneHeadCells.get(z.id);
+      if (head) head.textContent = z.name.trim() || `存放区 ${zi + 1}`;
+      clearStorageResult();
+      refreshValidity();
+    });
+    const capInp = document.createElement('input');
+    capInp.type = 'number';
+    capInp.className = 'storage-zone-cap';
+    capInp.min = '1';
+    capInp.step = '1';
+    capInp.value = z.capacity;
+    capInp.title = '格位数（正整数）';
+    capInp.addEventListener('input', () => {
+      z.capacity = Math.floor(Number(capInp.value) || 0);
+      clearStorageResult();
+      refreshValidity();
+    });
+    row.append(nameInp, capInp, Object.assign(document.createElement('span'), {
+      className: 'hint', textContent: '格',
+    }));
+    if (storage.zones.length > MIN_STORAGE_ZONES) {
+      const del = document.createElement('button');
+      del.className = 'btn btn-sm btn-danger';
+      del.textContent = '✕';
+      del.title = '移除该存放区';
+      del.addEventListener('click', () => {
+        storage.zones.splice(zi, 1);
+        clearStorageResult();
+        refreshStoragePanel(data);
+      });
+      row.appendChild(del);
+    }
+    zoneRows.appendChild(row);
+  });
+  if (storage.zones.length < MAX_STORAGE_ZONES) {
+    const add = document.createElement('button');
+    add.className = 'btn btn-sm';
+    add.textContent = '＋ 添加存放区';
+    add.addEventListener('click', () => {
+      storage.zones.push({ id: uid(), name: `存放区${storage.zones.length + 1}`, capacity: 4 });
+      clearStorageResult();
+      refreshStoragePanel(data);
+    });
+    zoneRows.appendChild(add);
+  }
+  wrap.appendChild(zoneRows);
+
+  // 逐道具 × 逐区取放耗时矩阵
+  const over = props.length > MAX_STORAGE_PROPS;
+  const tableHead = document.createElement('p');
+  tableHead.className = 'hint storage-table-head';
+  tableHead.textContent = `每件道具在各存放区一次取放所需的正整数分钟（点 ∅ 标记不可达），`
+    + `共 ${props.length} 种待存放道具（上限 ${MAX_STORAGE_PROPS} 种）`;
+  wrap.appendChild(tableHead);
+
+  const zoneHeadCells = new Map(); // 区 id → 矩阵表头单元格（改名时就地同步）
+  if (props.length && storage.zones.length) {
+    const table = document.createElement('table');
+    table.className = 'storage-table';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    htr.innerHTML = '<th class="col-idx">#</th><th>道具</th>';
+    for (const z of storage.zones) {
+      const th = document.createElement('th');
+      th.textContent = z.name.trim() || '（未命名）';
+      zoneHeadCells.set(z.id, th);
+      htr.appendChild(th);
+    }
+    thead.appendChild(htr);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    props.forEach((p, i) => {
+      const tr = document.createElement('tr');
+      const tdIdx = document.createElement('td');
+      tdIdx.textContent = i + 1;
+      const tdName = document.createElement('td');
+      tdName.textContent = p;
+      tr.append(tdIdx, tdName);
+      for (const z of storage.zones) {
+        const td = document.createElement('td');
+        td.className = 'storage-cell';
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.className = 'storage-minutes';
+        inp.min = '1';
+        inp.step = '1';
+        const tog = document.createElement('button');
+        tog.className = 'storage-unreach';
+        tog.type = 'button';
+        tog.textContent = '∅';
+        tog.title = '标记为不可达 / 恢复';
+        const paint = () => {
+          const v = storage.times[p][z.id];
+          const isX = v === 'x';
+          td.classList.toggle('storage-cell-x', isX);
+          td.classList.toggle('storage-missing', v === null);
+          tog.classList.toggle('is-on', isX);
+          inp.disabled = isX;
+          inp.value = isX || v === null ? '' : v;
+          inp.placeholder = isX ? '不可达' : '必填';
+        };
+        inp.addEventListener('input', () => {
+          const v = Math.floor(Number(inp.value) || 0);
+          storage.times[p][z.id] = v > 0 ? v : null;
+          paint();
+          clearStorageResult(); // 耗时改变，旧分配作废
+          refreshValidity();
+        });
+        tog.addEventListener('click', () => {
+          storage.times[p][z.id] = storage.times[p][z.id] === 'x' ? null : 'x';
+          paint();
+          clearStorageResult();
+          refreshValidity();
+        });
+        paint();
+        td.append(inp, tog);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+  }
+
+  // 提示与操作
+  const warn = document.createElement('div');
+  warn.className = 'storage-warn';
+
+  const actions = document.createElement('div');
+  actions.className = 'toolbar';
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary';
+  btn.textContent = '🗄 计算存放区分配';
+  btn.addEventListener('click', () => doStorage(data, btn));
+  actions.appendChild(btn);
+  actions.appendChild(Object.assign(document.createElement('span'), {
+    className: 'hint',
+    textContent: steps.length
+      ? `仅统计待执行的 ${steps.length} 个步骤；已完成前缀不参与分配。`
+      : '当前节目单没有待执行步骤，将返回空分配（0 分钟）。',
+  }));
+  wrap.appendChild(actions);
+
+  // 根据当前配置就地刷新提示与按钮（不重建输入框，避免打断输入）
+  function refreshValidity() {
+    const names = storage.zones.map(z => z.name.trim());
+    const blankZone = names.some(nm => !nm);
+    const dupZone = new Set(names).size !== names.length;
+    const badCap = storage.zones.some(z => !Number.isInteger(z.capacity) || z.capacity <= 0);
+    const missing = [];
+    for (const p of props) {
+      for (const z of storage.zones) {
+        if (storage.times[p][z.id] === null) missing.push(`${p}@${z.name.trim() || '?'}`);
+      }
+    }
+    const lines = [];
+    if (over) {
+      lines.push(`待存放道具共 ${props.length} 种，超过 ${MAX_STORAGE_PROPS} 种上限，无法分配，请调整节目单或道具集合。`);
+    }
+    if (blankZone) lines.push('存在空白的存放区名称，请补全。');
+    if (dupZone) lines.push('存放区名称不能重复。');
+    if (badCap) lines.push('每个存放区的格位数都必须是正整数。');
+    if (missing.length) {
+      lines.push(`还有 ${missing.length} 个取放耗时未填写（正整数分钟，或点 ∅ 标记不可达）：`
+        + `${missing.slice(0, 6).map(escapeHtml).join('、')}${missing.length > 6 ? ' 等' : ''}`);
+    }
+    warn.innerHTML = lines.map(x => `<div>⚠ ${x}</div>`).join('');
+    warn.style.display = lines.length ? '' : 'none';
+    btn.disabled = over || blankZone || dupZone || badCap || missing.length > 0;
+  }
+  refreshValidity();
+  wrap.appendChild(warn);
+
+  const resultBox = document.createElement('div');
+  resultBox.id = 'storage-result';
+  wrap.appendChild(resultBox);
+
+  // 有效旧结果直接重绘
+  if (state.storageResult) resultBox.appendChild(storageResultBlock(state.storageResult));
+  return wrap;
+}
+
+async function doStorage(data, btn) {
+  const storage = state.storage;
+  const steps = pendingScheduleSteps(data);
+  const zones = storage.zones.map(z => ({ name: z.name.trim(), capacity: z.capacity }));
+  const times = {};
+  for (const [p, row] of Object.entries(storage.times)) {
+    const out = {};
+    for (const z of storage.zones) {
+      const v = row[z.id];
+      out[z.name.trim()] = v === 'x' ? '不可达' : v;
+    }
+    times[p] = out;
+  }
+  btn.disabled = true;
+  let res;
+  try {
+    res = await api('/api/storage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        zones,
+        times,
+        steps: steps.map(s => ({
+          type: s.type,
+          phase: s.phase,
+          scene: s.scene,
+          from: s.from,
+          to: s.to,
+          fromStage: s.fromStage,
+          removed: s.removed,
+          added: s.added,
+        })),
+      }),
+    });
+  } finally {
+    btn.disabled = false;
+  }
+  const box = document.getElementById('storage-result');
+  box.innerHTML = '';
+  if (!res.ok) {
+    box.appendChild(errorBlock(res.errors && res.errors.length ? res.errors : ['分配失败，请检查存放区与取放耗时配置']));
+    return;
+  }
+  res.storageKey = scheduleStepsKey(steps);
+  state.storageResult = res;
+  box.appendChild(storageResultBlock(res));
+}
+
+/** 分配结果：总耗时汇总 + 各存放区清单 + 各道具位置明细。 */
+function storageResultBlock(res) {
+  const frag = document.createDocumentFragment();
+
+  const summary = document.createElement('div');
+  summary.className = 'timed-summary storage-summary';
+  summary.innerHTML =
+    `<span>全场取放最短总耗时：<strong>${res.totalMinutes}</strong> 分钟</span>`
+    + `<span>待存放道具：<strong>${res.propCount}</strong> 种</span>`
+    + `<span>存放区：<strong>${res.zoneCount}</strong> 个</span>`;
+  frag.appendChild(summary);
+
+  if (!res.propCount) {
+    const none = document.createElement('p');
+    none.className = 'hint';
+    none.textContent = '没有待执行的换景道具：空分配，总耗时 0 分钟。';
+    frag.appendChild(none);
+    return frag;
+  }
+
+  // 分区清单
+  const zoneWrap = document.createElement('div');
+  zoneWrap.className = 'storage-zone-cards';
+  for (const z of res.zones) {
+    const card = document.createElement('div');
+    card.className = 'storage-zone-card';
+    const head = document.createElement('div');
+    head.className = 'storage-zone-card-head';
+    head.innerHTML = `<span class="storage-zone-title">🗄 ${escapeHtml(z.name)}</span>`
+      + `<span class="hint">格位 ${z.used} / ${z.capacity}</span>`;
+    card.appendChild(head);
+    const chips = document.createElement('div');
+    chips.className = 'sched-tasks';
+    if (!z.props.length) {
+      chips.appendChild(Object.assign(document.createElement('span'), {
+        className: 'hint', textContent: '（本区空闲）',
+      }));
+    }
+    for (const it of z.props) {
+      const chip = document.createElement('span');
+      chip.className = 'sched-task';
+      chip.title = `${it.prop}：取放 ${it.moves} 次 × 单次 ${it.minutesPerMove} 分钟`;
+      chip.innerHTML = `${escapeHtml(it.prop)}<em>${it.moves}×${it.minutesPerMove}=${it.minutes}′</em>`;
+      chips.appendChild(chip);
+    }
+    card.appendChild(chips);
+    zoneWrap.appendChild(card);
+  }
+  frag.appendChild(zoneWrap);
+
+  // 各道具位置明细（按首次出现顺序）
+  const table = document.createElement('table');
+  table.className = 'storage-assign-table';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th class="col-idx">#</th><th>道具</th><th>存放区</th>'
+    + '<th class="col-stor-num">取放次数</th><th class="col-stor-num">单次(分)</th><th class="col-stor-num">小计(分)</th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const a of res.assignments) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${a.index}</td><td>${escapeHtml(a.prop)}</td>`
+      + `<td>${escapeHtml(a.zone)}</td><td>${a.moves}</td>`
+      + `<td>${a.minutesPerMove}</td><td><strong>${a.minutes}</strong></td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  frag.appendChild(table);
+  return frag;
 }
 
 function comparisonBlock(data) {
@@ -1853,6 +2237,7 @@ function adoptAlternative(data, alt) {
   state.live = adopted;
   state.replan = null;
   clearSchedule(); // 采用备选后节目单已改变
+  clearStorageResult();
   renderResult(adopted);
   showStatus(`已采用方案 ${alt.rank}：后续可在「🎬 演出中重排」中确认已完成前缀并按此顺序继续演出`);
 }
@@ -1937,6 +2322,8 @@ async function loadPlan() {
   state.replan = null;
   state.crew = null; // 载入方案后排班需按新节目单重新填写工时
   state.schedule = null;
+  state.storage = null; // 存放区配置与分配结果同样按新节目单重新录入
+  state.storageResult = null;
   if (data.plan.replanState && Array.isArray(data.plan.replanState.prefixIds)
       && data.plan.replanState.prefixIds.length) {
     state.savedReplan = {
@@ -2093,6 +2480,8 @@ function newPlan() {
   lastStockingReqKey = null;
   state.crew = null;
   state.schedule = null;
+  state.storage = null;
+  state.storageResult = null;
   $('#plan-name').value = '';
   $('#plan-select').value = '';
   applyMode('classic');

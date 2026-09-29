@@ -6,6 +6,7 @@ const { solve, replan, MAX_SCENES, MAX_ALTERNATIVES, normalizeProps } = require(
 const { packItems, validatePacking } = require('./packing');
 const { validateSchedule, scheduleSteps } = require('./scheduling');
 const { validateStocking, solveStocking } = require('./stocking');
+const { validateStorage, solveStorage } = require('./storage');
 const store = require('./store');
 
 const app = express();
@@ -313,6 +314,15 @@ app.post('/api/stock', (req, res) => {
   const { errors, required, prepared, missing, packages } = validateStocking(req.body);
   if (errors.length) return res.status(400).json({ ok: false, errors });
   const result = solveStocking(required, prepared, missing, packages);
+  if (!result.ok) return res.status(400).json({ ok: false, errors: result.errors });
+  res.json(result);
+});
+
+/** 侧台存放区分配：忽略已完成步骤，按取放次数累计耗时，求容量/可达限制下总耗时最短的固定存放区 */
+app.post('/api/storage', (req, res) => {
+  const { errors, zones, props, counts, costs } = validateStorage(req.body);
+  if (errors.length) return res.status(400).json({ ok: false, errors });
+  const result = solveStorage(props, counts, zones, costs);
   if (!result.ok) return res.status(400).json({ ok: false, errors: result.errors });
   res.json(result);
 });

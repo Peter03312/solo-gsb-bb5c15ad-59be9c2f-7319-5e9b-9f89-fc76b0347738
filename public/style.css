@@ -592,6 +592,86 @@ input[type="number"] { width: 70px; }
 }
 .sched-task em { color: var(--muted); font-style: normal; font-size: 11.5px; margin-left: 3px; }
 
+/* ================= 侧台存放区分配 ================= */
+.storage-panel {
+  border: 1px dashed #4e9a8f;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-top: 18px;
+  background: rgba(78, 154, 143, 0.06);
+}
+.storage-panel h3 { margin: 0 0 6px; }
+.storage-table-head { margin: 10px 0 4px; }
+.storage-zones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.storage-zone-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+.storage-zone-name { width: 120px; }
+.storage-zone-cap { width: 64px; }
+.storage-table { margin-bottom: 10px; }
+.storage-table th { font-size: 13px; }
+.storage-cell { white-space: nowrap; }
+.storage-minutes { width: 74px; }
+.storage-unreach {
+  margin-left: 3px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 22px;
+  border-radius: 6px;
+}
+.storage-unreach.is-on {
+  background: #d98a88;
+  border-color: #d98a88;
+  color: #2a1414;
+}
+.storage-cell-x .storage-minutes { opacity: 0.45; }
+.storage-missing { color: #ff9d9a; font-weight: bold; }
+.storage-warn {
+  color: #ffd27a;
+  font-size: 13.5px;
+  margin: 6px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.storage-summary { margin-top: 14px; }
+.storage-zone-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+.storage-zone-card {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid #4e9a8f;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.storage-zone-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.storage-zone-title { font-weight: bold; font-size: 14px; }
+.storage-assign-table { max-width: 640px; }
+.storage-assign-table .col-stor-num { width: 96px; }
+
 /* ================= 巡演备货 ================= */
 .stock-required {
   display: flex;
