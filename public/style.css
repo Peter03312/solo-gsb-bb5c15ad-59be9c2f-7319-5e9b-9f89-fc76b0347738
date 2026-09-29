@@ -592,6 +592,45 @@ input[type="number"] { width: 70px; }
 }
 .sched-task em { color: var(--muted); font-style: normal; font-size: 11.5px; margin-left: 3px; }
 
+/* ================= 侧台固定存放区 ================= */
+.storage-panel { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.storage-panel h3 { margin: 0 0 6px; }
+.storage-zones { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.storage-zone-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.storage-zone-name { width: 160px; }
+.storage-slots-field { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.storage-slots { width: 80px; }
+.storage-table { max-width: none; }
+.storage-table th, .storage-table td { text-align: center; }
+.storage-table td:nth-child(2) { text-align: left; }
+.storage-cnt { white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+.storage-cell { white-space: nowrap; }
+.storage-minutes { width: 76px; }
+.storage-unreach { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; margin-left: 6px; color: var(--muted); }
+.storage-cell-unreach { background: var(--card-2); opacity: 0.75; }
+.storage-summary { margin-top: 14px; }
+.storage-zone-result-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.storage-zone-card {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.storage-zone-card-head {
+  display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  font-size: 13.5px; margin-bottom: 6px;
+}
+.storage-zone-card-head strong { color: var(--accent); }
+.storage-prop-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+.storage-prop-chips li {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1px 10px;
+  font-size: 12.5px;
+}
+
 /* ================= 巡演备货 ================= */
 .stock-required {
   display: flex;

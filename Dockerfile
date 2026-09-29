@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.js solver.js packing.js scheduling.js stocking.js store.js ./
+COPY server.js solver.js packing.js scheduling.js stocking.js storage.js store.js ./
 COPY public ./public
 
 ENV NODE_ENV=production \

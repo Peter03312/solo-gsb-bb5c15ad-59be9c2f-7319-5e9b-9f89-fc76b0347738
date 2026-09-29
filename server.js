@@ -6,6 +6,7 @@ const { solve, replan, MAX_SCENES, MAX_ALTERNATIVES, normalizeProps } = require(
 const { packItems, validatePacking } = require('./packing');
 const { validateSchedule, scheduleSteps } = require('./scheduling');
 const { validateStocking, solveStocking } = require('./stocking');
+const { validateStorage, allocateStorage } = require('./storage');
 const store = require('./store');
 
 const app = express();
@@ -306,6 +307,15 @@ app.post('/api/schedule', (req, res) => {
   const { errors, workers, pendingSteps, durations } = validateSchedule(req.body);
   if (errors.length) return res.status(400).json({ ok: false, errors });
   res.json(scheduleSteps(pendingSteps, workers, durations));
+});
+
+/** 侧台存放区分配：仅对待执行步骤中的道具，在格位与可达限制下求总取放耗时最短的固定分配 */
+app.post('/api/storage', (req, res) => {
+  const { errors, zones, slots, props, counts, times } = validateStorage(req.body);
+  if (errors.length) return res.status(400).json({ ok: false, errors });
+  const result = allocateStorage(zones, slots, props, counts, times);
+  if (!result.ok) return res.status(400).json({ ok: false, errors: result.errors });
+  res.json(result);
 });
 
 /** 巡演备货：以场景道具全集为需求清单，标记已备齐道具，求覆盖全部缺件的最低总价采购包组合 */
